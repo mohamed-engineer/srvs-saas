@@ -80,7 +80,6 @@ export async function POST(request: NextRequest) {
   returnUrl.searchParams.set("order", merchantOrderId);
   const sessionBody = {
     merchantId,
-    mode,
     expireAt: new Date(now.getTime() + 30 * 60 * 1000).toISOString(),
     maxFailureAttempts: 3,
     paymentType: "credit",

@@ -87,7 +87,8 @@ export async function POST(request: NextRequest) {
     amount: price,
     currency: "EGP",
     order: merchantOrderId,
-    merchantRedirect: encodeURIComponent(returnUrl.toString()),
+    // The session API expects a URL here; encoding the entire value makes it fail URL validation.
+    merchantRedirect: returnUrl.toString(),
     ...(publicWebhookUrl ? { serverWebhook: publicWebhookUrl } : {}),
     display: "ar",
     type: "one-time",

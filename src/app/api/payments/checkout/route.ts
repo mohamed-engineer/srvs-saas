@@ -80,6 +80,7 @@ export async function POST(request: NextRequest) {
   returnUrl.searchParams.set("order", merchantOrderId);
   const sessionBody = {
     merchantId,
+    mode,
     expireAt: new Date(now.getTime() + 30 * 60 * 1000).toISOString(),
     maxFailureAttempts: 3,
     paymentType: "credit",
@@ -93,7 +94,8 @@ export async function POST(request: NextRequest) {
     allowedMethods: process.env.KASHIER_ALLOWED_METHODS || "card,wallet",
     failureRedirect: true,
     description: `اشتراك SRVS Accounting - ${name}`.slice(0, 119),
-    customer: { email: user.email },
+    // Kashier requires a stable merchant-side customer reference alongside the email.
+    customer: { email: user.email, reference: user.id },
     metaData: { workspaceId, userId: user.id, plan, slug },
   };
 
@@ -102,8 +104,25 @@ export async function POST(request: NextRequest) {
       method: "POST", headers: { "content-type": "application/json", Authorization: secretKey, "api-key": apiKey },
       body: JSON.stringify(sessionBody), cache: "no-store",
     });
-    const gatewayBody = await gatewayResponse.json() as { _id?: string; sessionUrl?: string; message?: string };
+    const gatewayBody = await gatewayResponse.json().catch(() => ({})) as {
+      _id?: string;
+      sessionUrl?: string;
+      message?: string;
+      error?: string | { message?: string; code?: string };
+      code?: string;
+    };
     if (!gatewayResponse.ok || !gatewayBody._id || !gatewayBody.sessionUrl) {
+      const providerError = typeof gatewayBody.error === "string"
+        ? gatewayBody.error
+        : gatewayBody.error?.message;
+      console.error("[kashier-checkout] Session creation rejected", {
+        status: gatewayResponse.status,
+        code: gatewayBody.code ?? (typeof gatewayBody.error === "object" ? gatewayBody.error?.code : undefined),
+        message: gatewayBody.message ?? providerError,
+        hasSessionId: Boolean(gatewayBody._id),
+        hasSessionUrl: Boolean(gatewayBody.sessionUrl),
+        mode,
+      });
       await admin.from("payment_orders").update({ status: "failed" }).eq("merchant_order_id", merchantOrderId);
       return NextResponse.json({ error: "Kashier لم يستطع إنشاء جلسة الدفع. راجع مفاتيح وضع الاختبار وإعدادات التاجر." }, { status: 502 });
     }

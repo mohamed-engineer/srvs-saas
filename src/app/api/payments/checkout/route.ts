@@ -94,7 +94,10 @@ export async function POST(request: NextRequest) {
     allowedMethods: process.env.KASHIER_ALLOWED_METHODS || "card,wallet",
     failureRedirect: true,
     description: `اشتراك SRVS Accounting - ${name}`.slice(0, 119),
-    // Kashier requires a stable merchant-side customer reference alongside the email.
+    // Kashier requires saveCard when customer details are supplied. Saving is optional,
+    // and this product does not retrieve or charge saved cards.
+    saveCard: "optional",
+    retrieveSavedCard: false,
     customer: { email: user.email, reference: user.id },
     metaData: { workspaceId, userId: user.id, plan, slug },
   };
@@ -124,7 +127,16 @@ export async function POST(request: NextRequest) {
         mode,
       });
       await admin.from("payment_orders").update({ status: "failed" }).eq("merchant_order_id", merchantOrderId);
-      return NextResponse.json({ error: "Kashier لم يستطع إنشاء جلسة الدفع. راجع مفاتيح وضع الاختبار وإعدادات التاجر." }, { status: 502 });
+      const diagnostic = [
+        `HTTP ${gatewayResponse.status}`,
+        gatewayBody.code ?? (typeof gatewayBody.error === "object" ? gatewayBody.error?.code : undefined),
+        gatewayBody.message ?? providerError,
+      ].filter(Boolean).join(" — ").slice(0, 300);
+      return NextResponse.json({
+        error: diagnostic
+          ? `Kashier رفضت إنشاء جلسة الدفع: ${diagnostic}`
+          : "Kashier رفضت إنشاء جلسة الدفع بدون توضيح. راجع مفاتيح ووضع التاجر في Vercel Logs.",
+      }, { status: 502 });
     }
     const checkout = new URL(gatewayBody.sessionUrl);
     if (checkout.protocol !== "https:" || checkout.hostname !== "payments.kashier.io") {
